@@ -1,20 +1,29 @@
+val t_ctr_codpra_decifr =
+  spark.read.parquet(conformedPath("t_ctr_codpra_decifr"))
+    .filter(col("cod_contr").isin(1, 2))
+    .select("COD_PRA", "COD_PRA_DECIFR")
+    
 
-val archivo = Archivio("peointermediari", iniconf, competenza)
+override def leggiConformedDf: DataFrame = {
 
-val peoIntermediariDf = archivo.mapped_df
+  val path = conformedPath(iniConf.conformedTableName)
 
-val mapping = archivo.iniconfArchivio.mappingNomi
+  try {
+    val conformedDf = spark.read.parquet(path)
+    normalizzaCampi(conformedDf, conformedDf.schema)
 
-val tieneColumna = peoIntermediariDf.columns.exists(
-  _.equalsIgnoreCase("COD_NDG_DECIFR")
-)
-
-if (!tieneColumna) {
-  throw new IllegalStateException(
-    "[RISKDB_MAPPING_ERROR] " +
-    "INI_PATH=" + iniconf.inifilePath +
-    " | MAPPING=" + mapping.toString +
-    " | RAW_COLUMNS=" + archivo.raw_df.columns.mkString(",") +
-    " | MAPPED_COLUMNS=" + peoIntermediariDf.columns.mkString(",")
-  )
+  } catch {
+    case _: AnalysisException =>
+      // Inicializar el conformed vacío
+      // con el esquema específico de TEveMvtcont
+  }
 }
+
+override def scriviConformed(): Unit = {
+  finalDf
+    .repartition(2)
+    .write
+    .mode("append")
+    .parquet(conformedPath(iniConf.conformedTableName))
+}
+
