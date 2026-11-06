@@ -1,29 +1,9 @@
-val t_ctr_codpra_decifr =
-  spark.read.parquet(conformedPath("t_ctr_codpra_decifr"))
-    .filter(col("cod_contr").isin(1, 2))
-    .select("COD_PRA", "COD_PRA_DECIFR")
+val cod_pra_hash_mapped_df =
+  spark.read.parquet(conformedPath("t_ctr_df"))
+    .select("cod_pra", "cod_pra_decifr", "cod_mast_ori_decifr")
     
-
-override def leggiConformedDf: DataFrame = {
-
-  val path = conformedPath(iniConf.conformedTableName)
-
-  try {
-    val conformedDf = spark.read.parquet(path)
-    normalizzaCampi(conformedDf, conformedDf.schema)
-
-  } catch {
-    case _: AnalysisException =>
-      // Inicializar el conformed vacío
-      // con el esquema específico de TEveMvtcont
-  }
-}
-
-override def scriviConformed(): Unit = {
-  finalDf
-    .repartition(2)
-    .write
-    .mode("append")
-    .parquet(conformedPath(iniConf.conformedTableName))
-}
-
+    val cod_ndg_hash_mapped_df =
+  spark.read.parquet(conformedPath("t_sup_codndg_decifr"))
+    .select("cod_ndg", "cod_ndg_decifr")
+    
+    
