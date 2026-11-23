@@ -1,102 +1,127 @@
-from datetime import date
+
+from datetime import datetime, timedelta
+
+from airflow import DAG
+from airflow.operators.python import PythonOperator
 
 from shared.config.config import (
-    cos_data,
     COS_DATA_BUCKET,
     COS_TECH_BUCKET,
     BACKUP_CONFIG_PATH,
     get_logger,
 )
-
 from shared.utils.utils import PathBuilder
-
 from shared.utils.backup_config_utils import (
     load_backup_config,
-    is_backup_due,
+    select_due_backups,
 )
+from shared.utils.backup_service import backup_table
 
-from shared.utils.backup_cos_utils import (
-    build_backup_paths,
-    split_cos_path,
-    list_backup_objects,
-    copy_backup_objects,
-)
-
-from shared.utils.backup_retention_utils import (
-    apply_backup_retention,
-)
 
 logger = get_logger(__name__)
 
-def backup_table(
-    paths: PathBuilder,
-    layer: str,
-    table_name: str,
-    reference_date: date,
-    dry_run: bool = True,
-) -> dict:
+DEFAULT_ARGS = {
+    "owner": "data-engineering",
+    "depends_on_past": False,
+    "retries": 1,
+    "retry_delay": timedelta(minutes=5),
+}
+
+
+def run_backup(layer: str, **context):
     """
-    Prepare and execute a backup for a single table.
+    Execute due backups for one logical layer.
+    Initially runs in simulation mode.
     """
 
-    source_path, target_path = build_backup_paths(
-        paths=paths,
-        layer=layer,
-        table_name=table_name,
-        reference_date=reference_date,
-    )
-
-    source_bucket, source_prefix = split_cos_path(
-        source_path
-    )
-
-    target_bucket, target_prefix = split_cos_path(
-        target_path
-    )
-
-    if source_bucket != target_bucket:
-        raise ValueError(
-            "Cross-bucket backups are not supported"
-        )
+    reference_date = context["logical_date"].date()
 
     logger.info(
-        "Backup table: %s | layer: %s | dry_run: %s",
-        table_name,
+        "Starting backup | layer=%s | date=%s",
         layer,
-        dry_run,
+        reference_date,
     )
 
-    logger.info("Source: %s", source_path)
-    logger.info("Target: %s", target_path)
-
-    objects = list_backup_objects(
-        cos_data,
-        source_bucket,
-        source_prefix,
+    configs = load_backup_config(
+        csv_key=BACKUP_CONFIG_PATH,
     )
 
-    if not objects:
-        raise ValueError(
-            f"No source objects found: {source_path}"
+    due_backups = select_due_backups(
+        configs=configs,
+        reference_date=reference_date,
+        layers=(layer,),
+    )
+
+    logger.info(
+        "Selected %s backup tables for %s",
+        len(due_backups),
+        layer,
+    )
+
+    paths = PathBuilder(
+        data_bucket=COS_DATA_BUCKET,
+        tech_bucket=COS_TECH_BUCKET,
+    )
+
+    results = []
+
+    for config in due_backups:
+        logger.info(
+            "Processing backup | table=%s | layer=%s",
+            config.table_name,
+            config.layer,
         )
 
-    result = {
-        "table_name": table_name,
-        "layer": layer,
-        "source": source_path,
-        "target": target_path,
-        "objects": len(objects),
-        "bytes": sum(obj["Size"] for obj in objects),
-        "dry_run": dry_run,
-    }
-
-    if not dry_run:
-        raise NotImplementedError(
-            "Snapshot consistency must be validated "
-            "before enabling backup writes"
+        result = backup_table(
+            paths=paths,
+            layer=config.layer,
+            table_name=config.table_name,
+            reference_date=reference_date,
+            dry_run=True,
         )
 
-    return result
+        results.append(result)
+
+    logger.info(
+        "Backup simulation completed | layer=%s | tables=%s",
+        layer,
+        len(results),
+    )
+
+    return results
+
+
+def create_backup_dag(dag_id: str, layer: str):
+
+    with DAG(
+        dag_id=dag_id,
+        default_args=DEFAULT_ARGS,
+        description=f"Scheduled COS backup for {layer}",
+        schedule=None,
+        start_date=datetime(2026, 11, 1),
+        catchup=False,
+        max_active_runs=1,
+        tags=["backup", "cos", layer],
+    ) as dag:
+
+        PythonOperator(
+            task_id="run_backup",
+            python_callable=run_backup,
+            op_kwargs={"layer": layer},
+        )
+
+    return dag
+
+
+backup_conformed = create_backup_dag(
+    dag_id="backup_conformed",
+    layer="conformed",
+)
+
+backup_reporting = create_backup_dag(
+    dag_id="backup_reporting",
+    layer="reporting",
+)
 
         
         
