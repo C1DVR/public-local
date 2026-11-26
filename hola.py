@@ -1,5 +1,5 @@
-curl -v --connect-timeout 5 --max-time 15 https://s3.direct.eu-fr2.cloud-object-storage.appdomain.cloud
 
-nc -vz -w 5 10.241.145.208 4381
 
-nc -vz -w 5 10.241.145.208 443
+kubectl describe secret dh-spark-conf -n spark-ap91055-dev-ae4d7e92
+
+kubectl describe configmap spark-drv-dfa7aca216eb6fd2-conf-map -n spark-ap91055-dev-ae4d7e92
